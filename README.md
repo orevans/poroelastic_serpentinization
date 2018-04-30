@@ -17,9 +17,9 @@ This repository contains the following directories:
 
 * **Running Models:** If the software is installed successfully the models can be run from within each subdirectory using
 
-  ```
+  	 ```
 		$ tfsimulationharness --test <filename>.shml
-		```
+	 ```
 
 		where `<filename>.shml` is the name of the *simulation harness* file that controls parameter sweeps and parallelization options. Models are described (boundary/initial conditions, timesteppers, weak forms, solvers etc.) in the *TerraFERMA* markup language files with suffix `.tfml`.
 
@@ -27,5 +27,5 @@ This repository contains the following directories:
 
   ```
 	$ diamond <filename>.tfml
-	```
+  ```
 
