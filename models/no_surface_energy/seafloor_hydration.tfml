@@ -1,0 +1,1431 @@
+<?xml version='1.0' encoding='utf-8'?>
+<terraferma_options>
+  <geometry>
+    <dimension>
+      <integer_value rank="0">2</integer_value>
+    </dimension>
+    <mesh name="Mesh">
+      <source name="File">
+        <file>
+          <string_value lines="1" type="filename">fracture_mesh.xml</string_value>
+        </file>
+        <cell>
+          <string_value lines="1">triangle</string_value>
+        </cell>
+      </source>
+    </mesh>
+  </geometry>
+  <io>
+    <output_base_name>
+      <string_value lines="1">serpentine</string_value>
+    </output_base_name>
+    <visualization>
+      <element name="P2">
+        <family>
+          <string_value lines="1">CG</string_value>
+        </family>
+        <degree>
+          <integer_value rank="0">2</integer_value>
+        </degree>
+      </element>
+    </visualization>
+    <dump_periods>
+      <visualization_period>
+        <real_value rank="0">0.1</real_value>
+      </visualization_period>
+    </dump_periods>
+    <detectors/>
+    <checkpointing>
+      <checkpoint_period>
+        <real_value rank="0">500.</real_value>
+      </checkpoint_period>
+    </checkpointing>
+  </io>
+  <timestepping>
+    <current_time>
+      <real_value rank="0">0</real_value>
+    </current_time>
+    <finish_time>
+      <real_value rank="0">4.</real_value>
+    </finish_time>
+    <timestep>
+      <coefficient name="Timestep">
+        <ufl_symbol name="global">
+          <string_value lines="1">dt</string_value>
+        </ufl_symbol>
+        <type name="Constant">
+          <rank name="Scalar" rank="0">
+            <value name="WholeMesh">
+              <constant>
+                <real_value rank="0">0.0005</real_value>
+              </constant>
+            </value>
+          </rank>
+        </type>
+      </coefficient>
+      <adaptive>
+        <constraint name="Maxdt">
+          <system name="SeafloorReactive"/>
+          <coefficient name="dtondtmax"/>
+          <requested_maximum_value>
+            <real_value rank="0">1.</real_value>
+          </requested_maximum_value>
+        </constraint>
+        <increase_tolerance>
+          <real_value rank="0">1.1</real_value>
+        </increase_tolerance>
+      </adaptive>
+    </timestep>
+  </timestepping>
+  <global_parameters>
+    <ufl>
+      <string_value lines="20" type="code" language="python"># Cell properties
+n  = FacetNormal(us_e.cell())
+
+# Permeability
+K = K_0*f_i*f_i
+
+# 1 - phi
+omp = 1. - phi0*f_i
+
+# phiB
+phiB = 1. - fA_i - phi0*f_i
+
+# Flux
+flux = K*(grad(p_i) - Gstar*ghat) 
+
+# Availability Function
+S = phi0*f_i*fA_i
+
+# General definitions
+epsilon  = sym(grad(u_i))
+epsilond = epsilon - tr(epsilon)/3.*Identity(2)
+
+# Effective stress
+sigma_eff = 2.*G*epsilond + Ke*tr(epsilon)*Identity(2)</string_value>
+    </ufl>
+    <dolfin>
+      <allow_extrapolation/>
+      <ghost_mode name="shared_facet"/>
+    </dolfin>
+  </global_parameters>
+  <system name="SeafloorReactive">
+    <mesh name="Mesh"/>
+    <ufl_symbol name="global">
+      <string_value lines="1">us</string_value>
+    </ufl_symbol>
+    <field name="Phi">
+      <ufl_symbol name="global">
+        <string_value lines="1">f</string_value>
+      </ufl_symbol>
+      <type name="Function">
+        <rank name="Scalar" rank="0">
+          <element name="P2">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">2</integer_value>
+            </degree>
+          </element>
+          <initial_condition type="initial_condition" name="WholeMesh">
+            <cpp rank="0">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr phicrack_ptr, phicrust_ptr, lcrack_ptr, wcrack_ptr;
+double phi_crack, phi_crust, l_crack, w_crack;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">phicrack_ptr = system()-&gt;fetch_coeff("phi_crack")-&gt;genericfunction_ptr(time());
+phicrust_ptr = system()-&gt;fetch_coeff("phi_crust")-&gt;genericfunction_ptr(time());
+lcrack_ptr   = system()-&gt;fetch_coeff("lcrack")-&gt;genericfunction_ptr(time());
+wcrack_ptr   = system()-&gt;fetch_coeff("wcrack")-&gt;genericfunction_ptr(time());
+
+phi_crack = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(phicrack_ptr));
+phi_crust = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(phicrust_ptr));
+l_crack   = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(lcrack_ptr));
+w_crack   = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(wcrack_ptr));</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">double z = x[1];
+double z_taper = 0.5*(1. + std::tanh((z + l_crack)/w_crack));
+
+// Width taper as a Gaussian of width w_crack
+double w_taper = std::exp(-(x[0]*x[0])/(w_crack*w_crack));
+
+double phi_init = phi_crust + (phi_crack - phi_crust)*z_taper*w_taper;
+values[0] = phi_init;</string_value>
+              </eval>
+            </cpp>
+          </initial_condition>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+    </field>
+    <field name="FluidPressure">
+      <ufl_symbol name="global">
+        <string_value lines="1">p</string_value>
+      </ufl_symbol>
+      <type name="Function">
+        <rank name="Scalar" rank="0">
+          <element name="P1">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">1</integer_value>
+            </degree>
+          </element>
+          <initial_condition type="initial_condition" name="WholeMesh">
+            <cpp rank="0">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr psurface_ptr, Gstar_ptr;
+double psurface, Gstar;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">psurface_ptr = system()-&gt;fetch_coeff("SurfacePressure")-&gt;genericfunction_ptr(time());
+Gstar_ptr = system()-&gt;fetch_coeff("Elastogravity")-&gt;genericfunction_ptr(time());
+
+psurface = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(psurface_ptr));
+Gstar = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(Gstar_ptr));</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">// hydrostatic pressure initial condition∂ 
+double p_init = psurface - Gstar*x[1];
+values[0] = p_init;</string_value>
+              </eval>
+            </cpp>
+          </initial_condition>
+          <boundary_condition name="Top">
+            <boundary_ids>
+              <integer_value shape="1" rank="1">4</integer_value>
+            </boundary_ids>
+            <sub_components name="All">
+              <type type="boundary_condition" name="Dirichlet">
+                <cpp rank="0">
+                  <members>
+                    <string_value lines="20" type="code" language="cpp">GenericFunction_ptr psurface_ptr;
+double psurface;</string_value>
+                  </members>
+                  <initialization>
+                    <string_value lines="20" type="code" language="cpp">psurface_ptr = system()-&gt;fetch_coeff("SurfacePressure")-&gt;genericfunction_ptr(time());
+
+psurface = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(psurface_ptr));</string_value>
+                  </initialization>
+                  <eval>
+                    <string_value lines="20" type="code" language="cpp">values[0] = psurface;</string_value>
+                  </eval>
+                </cpp>
+              </type>
+            </sub_components>
+          </boundary_condition>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+    </field>
+    <field name="PhiA">
+      <ufl_symbol name="global">
+        <string_value lines="1">fA</string_value>
+      </ufl_symbol>
+      <type name="Function">
+        <rank name="Scalar" rank="0">
+          <element name="P2">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">2</integer_value>
+            </degree>
+          </element>
+          <initial_condition type="initial_condition" name="WholeMesh">
+            <cpp rank="0">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr phicrack_ptr, phicrust_ptr, lcrack_ptr, wcrack_ptr, phi0_ptr;
+double phi_crack, phi_crust, l_crack, w_crack, phi0;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">phicrack_ptr = system()-&gt;fetch_coeff("phi_crack")-&gt;genericfunction_ptr(time());
+phicrust_ptr = system()-&gt;fetch_coeff("phi_crust")-&gt;genericfunction_ptr(time());
+lcrack_ptr   = system()-&gt;fetch_coeff("lcrack")-&gt;genericfunction_ptr(time());
+wcrack_ptr   = system()-&gt;fetch_coeff("wcrack")-&gt;genericfunction_ptr(time());
+phi0_ptr     = system()-&gt;fetch_coeff("phi0")-&gt;genericfunction_ptr(time());
+
+phi_crack = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(phicrack_ptr));
+phi_crust = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(phicrust_ptr));
+l_crack   = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(lcrack_ptr));
+w_crack   = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(wcrack_ptr));
+phi0      = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(phi0_ptr));</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">double z = x[1];
+double z_taper = 0.5*(1. + std::tanh((z + l_crack)/w_crack));
+
+// Width taper as a Gaussian of width w_crack
+double w_taper = std::exp(-(x[0]*x[0])/(w_crack*w_crack));
+
+double phi_init  = phi_crust + (phi_crack - phi_crust)*z_taper*w_taper;
+double phiA_init = 1. - phi0*phi_init;
+values[0] = phiA_init;</string_value>
+              </eval>
+            </cpp>
+          </initial_condition>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+    </field>
+    <field name="Displacement">
+      <ufl_symbol name="global">
+        <string_value lines="1">u</string_value>
+      </ufl_symbol>
+      <type name="Function">
+        <rank name="Vector" rank="1">
+          <element name="P2">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">2</integer_value>
+            </degree>
+          </element>
+          <initial_condition type="initial_condition" name="WholeMesh">
+            <cpp rank="1">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr Gstar_ptr, Ke_ptr, rhobar_ptr, rhof_ptr;
+double Gstar, Ke, G, rho_bar, rho_f;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">Gstar_ptr  = system()-&gt;fetch_coeff("Elastogravity")-&gt;genericfunction_ptr(time());
+Ke_ptr     = system()-&gt;fetch_coeff("BulkModulus")-&gt;genericfunction_ptr(time());
+rhobar_ptr = system()-&gt;fetch_coeff("rho_bar")-&gt;genericfunction_ptr(time());
+rhof_ptr   = system()-&gt;fetch_coeff("rho_f")-&gt;genericfunction_ptr(time());
+
+Gstar   = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(Gstar_ptr));
+Ke      = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(Ke_ptr));
+G       = 0.5*Ke;
+rho_bar = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(rhobar_ptr));
+rho_f   = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(rhof_ptr));</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">// Equilibrium state solution for displacement
+double lamb  = Ke - 2.*G/3.;
+double beta  = lamb/(2.*(lamb + G));
+double alpha = Gstar*(rho_bar/rho_f - 1.);
+
+values[0] = 0.0;
+values[1] = G*alpha*(1. - beta - beta*beta/(1. - beta))*(x[1]*x[1] - 1.);</string_value>
+              </eval>
+            </cpp>
+          </initial_condition>
+          <boundary_condition name="Left">
+            <boundary_ids>
+              <integer_value shape="1" rank="1">1</integer_value>
+            </boundary_ids>
+            <sub_components name="x">
+              <components>
+                <integer_value shape="1" rank="1">0</integer_value>
+              </components>
+              <type type="boundary_condition" name="Dirichlet">
+                <constant>
+                  <real_value rank="0">0</real_value>
+                </constant>
+              </type>
+            </sub_components>
+          </boundary_condition>
+          <boundary_condition name="Right">
+            <boundary_ids>
+              <integer_value shape="1" rank="1">2</integer_value>
+            </boundary_ids>
+            <sub_components name="x">
+              <components>
+                <integer_value shape="1" rank="1">0</integer_value>
+              </components>
+              <type type="boundary_condition" name="Dirichlet">
+                <constant>
+                  <real_value rank="0">0</real_value>
+                </constant>
+              </type>
+            </sub_components>
+          </boundary_condition>
+          <boundary_condition name="Base">
+            <boundary_ids>
+              <integer_value shape="1" rank="1">3</integer_value>
+            </boundary_ids>
+            <sub_components name="y">
+              <components>
+                <integer_value shape="1" rank="1">1</integer_value>
+              </components>
+              <type type="boundary_condition" name="Dirichlet">
+                <constant>
+                  <real_value rank="0">0</real_value>
+                </constant>
+              </type>
+            </sub_components>
+          </boundary_condition>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+    </field>
+    <coefficient name="R_phi">
+      <ufl_symbol name="global">
+        <string_value lines="1">R_phi</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">-0.548510614336393</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+    </coefficient>
+    <coefficient name="R_phi_A">
+      <ufl_symbol name="global">
+        <string_value lines="1">R_phi_A</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">-0.01</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+    </coefficient>
+    <coefficient name="R_p">
+      <ufl_symbol name="global">
+        <string_value lines="1">R_p</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">-0.0800608142350356</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+    </coefficient>
+    <coefficient name="SurfacePressure">
+      <ufl_symbol name="global">
+        <string_value lines="1">p_surface</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">0.001</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+      <comment>Seafloor fluid pressure: approx 17.7 MPa for a depth of 1800m.</comment>
+    </coefficient>
+    <coefficient name="BulkModulus">
+      <ufl_symbol name="global">
+        <string_value lines="1">Ke</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">1</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Elastic bulk modulus</comment>
+    </coefficient>
+    <coefficient name="ShearModulus">
+      <ufl_symbol name="global">
+        <string_value lines="1">G</string_value>
+      </ufl_symbol>
+      <type name="Expression">
+        <rank name="Scalar" rank="0">
+          <element name="P2">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">2</integer_value>
+            </degree>
+          </element>
+          <value type="value" name="WholeMesh">
+            <cpp rank="0">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr Ke_ptr;
+double Ke;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">Ke_ptr = system()-&gt;fetch_coeff("BulkModulus")-&gt;genericfunction_ptr(time());
+
+Ke = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(Ke_ptr));</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">values[0] = 0.5*Ke;</string_value>
+              </eval>
+            </cpp>
+          </value>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+      <comment>Elastic shear modulus</comment>
+    </coefficient>
+    <coefficient name="Damkohler">
+      <ufl_symbol name="global">
+        <string_value lines="1">Da</string_value>
+      </ufl_symbol>
+      <type name="Expression">
+        <rank name="Scalar" rank="0">
+          <element name="P2">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">2</integer_value>
+            </degree>
+          </element>
+          <value type="value" name="WholeMesh">
+            <cpp rank="0">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr R_ptr, w_ptr, phi0_ptr;
+double R, w, phi0;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">R_ptr = system()-&gt;fetch_coeff("R")-&gt;genericfunction_ptr(time());
+w_ptr = system()-&gt;fetch_coeff("w")-&gt;genericfunction_ptr(time());
+phi0_ptr = system()-&gt;fetch_coeff("phi0")-&gt;genericfunction_ptr(time());
+
+R = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(R_ptr));
+w = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(w_ptr));
+phi0 = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(phi0_ptr));</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">double K_phi = w*w*phi0;
+double Da = R*(1.e4)*0.84*(8.9e-4)/(phi0*3300.*K_phi*(1.e11));
+values[0] = Da;</string_value>
+              </eval>
+            </cpp>
+          </value>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+      <comment>Damkohler number</comment>
+    </coefficient>
+    <coefficient name="phi0">
+      <ufl_symbol name="global">
+        <string_value lines="1">phi0</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">0.01</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Reference porosity</comment>
+    </coefficient>
+    <coefficient name="K_0">
+      <ufl_symbol name="global">
+        <string_value lines="1">K_0</string_value>
+      </ufl_symbol>
+      <type name="Expression">
+        <rank name="Scalar" rank="0">
+          <element name="P2">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">2</integer_value>
+            </degree>
+          </element>
+          <value type="value" name="WholeMesh">
+            <cpp rank="0">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr Kcrack_ptr, lcrack_ptr, wcrack_ptr;
+double K_crack, l_crack, w_crack;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">Kcrack_ptr = system()-&gt;fetch_coeff("Kcrack")-&gt;genericfunction_ptr(time());
+lcrack_ptr = system()-&gt;fetch_coeff("lcrack")-&gt;genericfunction_ptr(time());
+wcrack_ptr = system()-&gt;fetch_coeff("wcrack")-&gt;genericfunction_ptr(time());
+
+K_crack = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(Kcrack_ptr));
+l_crack = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(lcrack_ptr));
+w_crack = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(wcrack_ptr));</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">double z = x[1];
+double z_taper = 0.5*(1. + std::tanh((z + l_crack)/w_crack));
+
+// Width taper as a Gaussian of width w_crack
+double w_taper = std::exp(-(x[0]*x[0])/(w_crack*w_crack));
+
+double K_0 = 1. + (K_crack - 1.)*z_taper*w_taper;
+values[0] = K_0;</string_value>
+              </eval>
+            </cpp>
+          </value>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+      <comment>Background permeability field</comment>
+    </coefficient>
+    <coefficient name="Kcrack">
+      <ufl_symbol name="global">
+        <string_value lines="1">Kcrack</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">1.</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Crack permeability factor</comment>
+    </coefficient>
+    <coefficient name="lcrack">
+      <ufl_symbol name="global">
+        <string_value lines="1">lcrack</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">0.5</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Length (i.e. depth) of crack</comment>
+    </coefficient>
+    <coefficient name="wcrack">
+      <ufl_symbol name="global">
+        <string_value lines="1">wcrack</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">0.005</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Width of  crack</comment>
+    </coefficient>
+    <coefficient name="phi_crust">
+      <ufl_symbol name="global">
+        <string_value lines="1">phi_crust</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">0.01</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Initial background porosity in outside of crack (will be scaled by phi0)</comment>
+    </coefficient>
+    <coefficient name="phi_crack">
+      <ufl_symbol name="global">
+        <string_value lines="1">phi_crack</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">1.</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Initial porosity of crack (will be scaled by phi0)</comment>
+    </coefficient>
+    <coefficient name="Elastogravity">
+      <ufl_symbol name="global">
+        <string_value lines="1">Gstar</string_value>
+        <comment>Elastogravity number Gstar</comment>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">9.81e-5</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Elastogravity number</comment>
+    </coefficient>
+    <coefficient name="ghat">
+      <ufl_symbol name="global">
+        <string_value lines="1">ghat</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Vector" rank="1">
+          <value type="value" name="WholeMesh">
+            <constant name="dim">
+              <real_value shape="2" dim1="dim" rank="1">0 -1</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Unit vector in the direction of gravity</comment>
+    </coefficient>
+    <coefficient name="FluidCompressibility">
+      <ufl_symbol name="global">
+        <string_value lines="1">beta</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">90000.</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Fluid compressibility (set to zero)</comment>
+    </coefficient>
+    <coefficient name="rho_bar">
+      <ufl_symbol name="global">
+        <string_value lines="1">rho_bar</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">3300</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Phase averaged density.</comment>
+    </coefficient>
+    <coefficient name="rho_f">
+      <ufl_symbol name="global">
+        <string_value lines="1">rho_f</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">1000</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Fluid density (1.0 kg/m^3 for water)</comment>
+    </coefficient>
+    <coefficient name="max_dt">
+      <ufl_symbol name="global">
+        <string_value lines="1">max_dt</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">0.005</real_value>
+              <comment>Maximum timestep</comment>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Maximum timestep in adaptive timestepper</comment>
+    </coefficient>
+    <coefficient name="dtondtmax">
+      <ufl_symbol name="global">
+        <string_value lines="1">dtondtmax</string_value>
+      </ufl_symbol>
+      <type name="Expression">
+        <rank name="Scalar" rank="0">
+          <element name="P0R">
+            <family>
+              <string_value lines="1">R</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">0</integer_value>
+            </degree>
+          </element>
+          <value type="value" name="WholeMesh">
+            <cpp rank="0">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr max_dt_ptr;
+double dt_max;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">max_dt_ptr = system()-&gt;fetch_coeff("max_dt")-&gt;genericfunction_ptr(time());
+dt_max = double(*std::dynamic_pointer_cast&lt;dolfin::Constant&gt;(max_dt_ptr));</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">values[0] = bucket()-&gt;timestep()/dt_max;</string_value>
+              </eval>
+            </cpp>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+    </coefficient>
+    <coefficient name="w">
+      <ufl_symbol name="global">
+        <string_value lines="1">w</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">1.e-6</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Crack-width of micro-model. Use this to calculate the background permeability.</comment>
+    </coefficient>
+    <coefficient name="R">
+      <ufl_symbol name="global">
+        <string_value lines="1">R</string_value>
+      </ufl_symbol>
+      <type name="Constant">
+        <rank name="Scalar" rank="0">
+          <value type="value" name="WholeMesh">
+            <constant>
+              <real_value rank="0">1.e-3</real_value>
+            </constant>
+          </value>
+        </rank>
+      </type>
+      <diagnostics/>
+      <comment>Effective reaction rate</comment>
+    </coefficient>
+    <nonlinear_solver name="Solver">
+      <type name="SNES">
+        <form name="Residual" rank="0">
+          <string_value lines="20" type="code" language="python"># Residuals: porosity, compaction pressure and phase_A
+F_f   = f_t*(f_i - f_n - omp*div(u_i - u_n) - dt*R_phi*Da*S)*dx
+F_fA  = fA_t*(fA_i - fA_n + phi0*fA_i*div(u_i - u_n) - dt*R_phi_A*Da*S)*dx
+F_p   = p_t*div(u_i - u_n)*dx + beta*f_i*p_t*(p_i - p_n)*dx + \
+        + dt*(K*(inner(grad(p_i), grad(p_t)) - Gstar*inner(grad(p_t), ghat)) \
+        - p_t*R_p*Da*S)*dx
+
+# Displacement residual
+epsilon_t = sym(grad(u_t))
+
+F_u = (inner(epsilon_t, sigma_eff) + inner(u_t, grad(p_i)))*dx \
+      - (Gstar*rho_bar/rho_f)*inner(u_t, ghat)*dx 
+
+F = F_f + F_fA + F_p + F_u</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">F</string_value>
+          </ufl_symbol>
+        </form>
+        <form name="Jacobian" rank="1">
+          <string_value lines="20" type="code" language="python">J = derivative(F,us_i,us_a)</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">J</string_value>
+          </ufl_symbol>
+        </form>
+        <form_representation name="quadrature"/>
+        <quadrature_rule name="default"/>
+        <snes_type name="vi">
+          <constraints>
+            <lower_bound>
+              <field name="Phi">
+                <constant>
+                  <real_value rank="0">-1e-05</real_value>
+                </constant>
+              </field>
+              <field name="PhiA">
+                <constant>
+                  <real_value rank="0">-1e-05</real_value>
+                </constant>
+              </field>
+              <monitors/>
+            </lower_bound>
+          </constraints>
+          <convergence_test name="default"/>
+        </snes_type>
+        <relative_error>
+          <real_value rank="0">1e-06</real_value>
+        </relative_error>
+        <absolute_error>
+          <real_value rank="0">1e-10</real_value>
+        </absolute_error>
+        <max_iterations>
+          <integer_value rank="0">50</integer_value>
+        </max_iterations>
+        <monitors>
+          <view_snes/>
+          <residual/>
+        </monitors>
+        <linear_solver>
+          <iterative_method name="preonly"/>
+          <preconditioner name="lu">
+            <factorization_package name="mumps"/>
+          </preconditioner>
+        </linear_solver>
+        <never_ignore_solver_failures/>
+      </type>
+      <solve name="in_timeloop"/>
+    </nonlinear_solver>
+  </system>
+  <system name="EffectiveStress">
+    <mesh name="Mesh"/>
+    <ufl_symbol name="global">
+      <string_value lines="1">usigma_eff</string_value>
+    </ufl_symbol>
+    <field name="Sigma_eff">
+      <ufl_symbol name="global">
+        <string_value lines="1">sigma_effp</string_value>
+      </ufl_symbol>
+      <type name="Function">
+        <rank name="Tensor" rank="2">
+          <element name="P1DG">
+            <family>
+              <string_value lines="1">DG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">1</integer_value>
+            </degree>
+          </element>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+    </field>
+    <coefficient name="lambda1">
+      <ufl_symbol name="global">
+        <string_value lines="1">lambda1</string_value>
+      </ufl_symbol>
+      <type name="Expression">
+        <rank name="Scalar" rank="0">
+          <element name="P1DG">
+            <family>
+              <string_value lines="1">DG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">1</integer_value>
+            </degree>
+          </element>
+          <value type="value" name="WholeMesh">
+            <cpp rank="0">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr sigma_eff_ptr;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">sigma_eff_ptr = system()-&gt;fetch_field("Sigma_eff")-&gt;genericfunction_ptr(time());</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">dolfin::Array&lt;double&gt; tmpvalues(4);
+
+sigma_eff_ptr-&gt;eval(tmpvalues, x);
+double sigma_xx = tmpvalues[0];
+double sigma_xy = tmpvalues[1];
+double sigma_yy = tmpvalues[3];
+
+double tr = sigma_xx + sigma_yy;
+double det = sigma_xx*sigma_yy - sigma_xy*sigma_xy;
+
+double lambda_1 = 0.5*( tr + std::sqrt(tr*tr - 4.*det));
+double lambda_2 = 0.5*( tr - std::sqrt(tr*tr - 4.*det));
+if ( lambda_2 &gt; lambda_1 ) 
+{
+  double tmp = lambda_1;
+  lambda_1 = lambda_2;
+  lambda_2 = tmp;
+};
+values[0] = lambda_1;</string_value>
+              </eval>
+            </cpp>
+          </value>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+      <comment>first eigenvector \lambda1 || x_1||</comment>
+    </coefficient>
+    <coefficient name="sigma1">
+      <ufl_symbol name="global">
+        <string_value lines="1">sigma1</string_value>
+      </ufl_symbol>
+      <type name="Expression">
+        <rank name="Vector" rank="1">
+          <element name="P1DG">
+            <family>
+              <string_value lines="1">DG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">1</integer_value>
+            </degree>
+          </element>
+          <value type="value" name="WholeMesh">
+            <cpp rank="1">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr sigma_eff_ptr;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">sigma_eff_ptr = system()-&gt;fetch_field("Sigma_eff")-&gt;genericfunction_ptr(time());</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">dolfin::Array&lt;double&gt; tmpvalues(4);
+
+sigma_eff_ptr-&gt;eval(tmpvalues, x);
+double sigma_xx = tmpvalues[0];
+double sigma_xy = tmpvalues[1];
+double sigma_yy = tmpvalues[3];
+
+double tr = sigma_xx + sigma_yy;
+double det = sigma_xx*sigma_yy - sigma_xy*sigma_xy;
+
+double lambda_1 = 0.5*( tr + std::sqrt(tr*tr - 4.*det));
+double lambda_2 = 0.5*( tr - std::sqrt(tr*tr - 4.*det));
+if ( lambda_2 &gt; lambda_1 ) 
+{
+  double tmp = lambda_1;
+  lambda_1 = lambda_2;
+  lambda_2 = tmp;
+};
+double x11 = sigma_xy;
+double x12 = lambda_1 - sigma_xx;
+double normx = std::sqrt(x11*x11 + x12*x12);
+
+if(std::abs(lambda_1) &gt; std::abs(lambda_2))
+{
+  values[0] = x11/normx;
+  values[1] = x12/normx;
+}
+else
+{
+  values[0] = (std::abs(lambda_1)/std::abs(lambda_2))*x11/normx;
+  values[1] = (std::abs(lambda_1)/std::abs(lambda_2))*x12/normx;
+}
+//values[0] = lambda_1*x11/normx;
+//values[1] = lambda_1*x12/normx;</string_value>
+              </eval>
+            </cpp>
+          </value>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+      <comment>first eigenvector \lambda1 || x_1||</comment>
+    </coefficient>
+    <coefficient name="lambda2">
+      <ufl_symbol name="global">
+        <string_value lines="1">lambda2</string_value>
+      </ufl_symbol>
+      <type name="Expression">
+        <rank name="Scalar" rank="0">
+          <element name="P1DG">
+            <family>
+              <string_value lines="1">DG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">1</integer_value>
+            </degree>
+          </element>
+          <value type="value" name="WholeMesh">
+            <cpp rank="0">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr sigma_eff_ptr;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">sigma_eff_ptr = system()-&gt;fetch_field("Sigma_eff")-&gt;genericfunction_ptr(time());</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">dolfin::Array&lt;double&gt; tmpvalues(4);
+
+sigma_eff_ptr-&gt;eval(tmpvalues, x);
+double sigma_xx = tmpvalues[0];
+double sigma_xy = tmpvalues[1];
+double sigma_yy = tmpvalues[3];
+
+double tr = sigma_xx + sigma_yy;
+double det = sigma_xx*sigma_yy - sigma_xy*sigma_xy;
+
+double lambda_1 = 0.5*( tr + std::sqrt(tr*tr - 4.*det));
+double lambda_2 = 0.5*( tr - std::sqrt(tr*tr - 4.*det));
+if ( lambda_2 &gt; lambda_1 ) 
+{
+  double tmp = lambda_1;
+  lambda_1 = lambda_2;
+  lambda_2 = tmp;
+};
+values[0] = lambda_2;</string_value>
+              </eval>
+            </cpp>
+          </value>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+      <comment>first eigenvector \lambda1 || x_1||</comment>
+    </coefficient>
+    <coefficient name="sigma2">
+      <ufl_symbol name="global">
+        <string_value lines="1">sigma2</string_value>
+      </ufl_symbol>
+      <type name="Expression">
+        <rank name="Vector" rank="1">
+          <element name="P1DG">
+            <family>
+              <string_value lines="1">DG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">1</integer_value>
+            </degree>
+          </element>
+          <value type="value" name="WholeMesh">
+            <cpp rank="1">
+              <members>
+                <string_value lines="20" type="code" language="cpp">GenericFunction_ptr sigma_eff_ptr;</string_value>
+              </members>
+              <initialization>
+                <string_value lines="20" type="code" language="cpp">sigma_eff_ptr = system()-&gt;fetch_field("Sigma_eff")-&gt;genericfunction_ptr(time());</string_value>
+              </initialization>
+              <eval>
+                <string_value lines="20" type="code" language="cpp">dolfin::Array&lt;double&gt; tmpvalues(4);
+
+sigma_eff_ptr-&gt;eval(tmpvalues, x);
+double sigma_xx = tmpvalues[0];
+double sigma_xy = tmpvalues[1];
+double sigma_yy = tmpvalues[3];
+
+double tr = sigma_xx + sigma_yy;
+double det = sigma_xx*sigma_yy - sigma_xy*sigma_xy;
+
+double lambda_1 = 0.5*( tr + std::sqrt(tr*tr - 4.*det));
+double lambda_2 = 0.5*( tr - std::sqrt(tr*tr - 4.*det));
+if ( lambda_2 &gt; lambda_1 ) 
+{
+  double tmp = lambda_1;
+  lambda_1 = lambda_2;
+  lambda_2 = tmp;
+};
+double x21 = sigma_xy;
+double x22 = lambda_2 - sigma_xx;
+double normx = std::sqrt(x21*x21 + x22*x22);
+
+if(std::abs(lambda_2) &gt; std::abs(lambda_1))
+{
+  values[0] = x21/normx;
+  values[1] = x22/normx;
+}
+else
+{
+  values[0] = (std::abs(lambda_2)/std::abs(lambda_1))*x21/normx;
+  values[1] = (std::abs(lambda_2)/std::abs(lambda_1))*x22/normx;
+}
+//values[0] = lambda_2*x21/normx;
+//values[1] = lambda_2*x22/normx;</string_value>
+              </eval>
+            </cpp>
+          </value>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+      <comment>first eigenvector \lambda1 || x_1||</comment>
+    </coefficient>
+    <nonlinear_solver name="Solve">
+      <type name="SNES">
+        <form name="Residual" rank="0">
+          <string_value lines="20" type="code" language="python">F = inner(sigma_effp_t,(sigma_effp_i - sigma_eff))*dx</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">F</string_value>
+          </ufl_symbol>
+        </form>
+        <form name="Jacobian" rank="1">
+          <string_value lines="20" type="code" language="python">J = derivative(F,usigma_eff_i,usigma_eff_a)</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">J</string_value>
+          </ufl_symbol>
+        </form>
+        <form_representation name="quadrature"/>
+        <quadrature_rule name="default"/>
+        <snes_type name="ls">
+          <ls_type name="cubic"/>
+          <convergence_test name="default"/>
+        </snes_type>
+        <relative_error>
+          <real_value rank="0">1e-06</real_value>
+        </relative_error>
+        <max_iterations>
+          <integer_value rank="0">20</integer_value>
+        </max_iterations>
+        <monitors>
+          <residual/>
+        </monitors>
+        <linear_solver>
+          <iterative_method name="cg">
+            <relative_error>
+              <real_value rank="0">1e-06</real_value>
+            </relative_error>
+            <absolute_error>
+              <real_value rank="0">1e-10</real_value>
+            </absolute_error>
+            <max_iterations>
+              <integer_value rank="0">100</integer_value>
+            </max_iterations>
+            <zero_initial_guess/>
+            <monitors>
+              <preconditioned_residual/>
+            </monitors>
+          </iterative_method>
+          <preconditioner name="sor"/>
+        </linear_solver>
+        <never_ignore_solver_failures/>
+      </type>
+      <solve name="with_diagnostics"/>
+    </nonlinear_solver>
+  </system>
+  <system name="SerpentinizationFraction">
+    <mesh name="Mesh"/>
+    <ufl_symbol name="global">
+      <string_value lines="1">userp</string_value>
+    </ufl_symbol>
+    <field name="PhiB">
+      <ufl_symbol name="global">
+        <string_value lines="1">fB</string_value>
+      </ufl_symbol>
+      <type name="Function">
+        <rank name="Scalar" rank="0">
+          <element name="P2">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">2</integer_value>
+            </degree>
+          </element>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+    </field>
+    <nonlinear_solver name="Solve">
+      <type name="SNES">
+        <form name="Residual" rank="0">
+          <string_value lines="20" type="code" language="python">F = fB_t*(fB_i - phiB)*dx</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">F</string_value>
+          </ufl_symbol>
+        </form>
+        <form name="Jacobian" rank="1">
+          <string_value lines="20" type="code" language="python">J = derivative(F,userp_i,userp_a)</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">J</string_value>
+          </ufl_symbol>
+        </form>
+        <form_representation name="quadrature"/>
+        <quadrature_rule name="default"/>
+        <snes_type name="ls">
+          <ls_type name="cubic"/>
+          <convergence_test name="default"/>
+        </snes_type>
+        <relative_error>
+          <real_value rank="0">1e-06</real_value>
+        </relative_error>
+        <absolute_error>
+          <real_value rank="0">1.e-10</real_value>
+        </absolute_error>
+        <max_iterations>
+          <integer_value rank="0">20</integer_value>
+        </max_iterations>
+        <monitors>
+          <residual/>
+        </monitors>
+        <linear_solver>
+          <iterative_method name="preonly"/>
+          <preconditioner name="lu">
+            <factorization_package name="mumps"/>
+          </preconditioner>
+        </linear_solver>
+        <never_ignore_solver_failures/>
+      </type>
+      <solve name="with_diagnostics"/>
+    </nonlinear_solver>
+  </system>
+  <system name="Flux">
+    <mesh name="Mesh"/>
+    <ufl_symbol name="global">
+      <string_value lines="1">uq</string_value>
+    </ufl_symbol>
+    <field name="Q">
+      <ufl_symbol name="global">
+        <string_value lines="1">q</string_value>
+      </ufl_symbol>
+      <type name="Function">
+        <rank name="Vector" rank="1">
+          <element name="P2">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">2</integer_value>
+            </degree>
+          </element>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+    </field>
+    <nonlinear_solver name="Solve">
+      <type name="SNES">
+        <form name="Residual" rank="0">
+          <string_value lines="20" type="code" language="python">F = inner(q_t, q_i + flux)*dx</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">F</string_value>
+          </ufl_symbol>
+        </form>
+        <form name="Jacobian" rank="1">
+          <string_value lines="20" type="code" language="python">J = derivative(F,uq_i,uq_a)</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">J</string_value>
+          </ufl_symbol>
+        </form>
+        <form_representation name="quadrature"/>
+        <quadrature_rule name="default"/>
+        <snes_type name="ls">
+          <ls_type name="cubic"/>
+          <convergence_test name="default"/>
+        </snes_type>
+        <relative_error>
+          <real_value rank="0">1e-06</real_value>
+        </relative_error>
+        <absolute_error>
+          <real_value rank="0">1.e-10</real_value>
+        </absolute_error>
+        <max_iterations>
+          <integer_value rank="0">20</integer_value>
+        </max_iterations>
+        <monitors>
+          <residual/>
+        </monitors>
+        <linear_solver>
+          <iterative_method name="preonly"/>
+          <preconditioner name="lu">
+            <factorization_package name="mumps"/>
+          </preconditioner>
+        </linear_solver>
+        <never_ignore_solver_failures/>
+      </type>
+      <solve name="with_diagnostics"/>
+    </nonlinear_solver>
+  </system>
+  <system name="VolumetricStrain">
+    <mesh name="Mesh"/>
+    <ufl_symbol name="global">
+      <string_value lines="1">udivu</string_value>
+    </ufl_symbol>
+    <field name="DivU">
+      <ufl_symbol name="global">
+        <string_value lines="1">divu</string_value>
+      </ufl_symbol>
+      <type name="Function">
+        <rank name="Scalar" rank="0">
+          <element name="P2">
+            <family>
+              <string_value lines="1">CG</string_value>
+            </family>
+            <degree>
+              <integer_value rank="0">2</integer_value>
+            </degree>
+          </element>
+        </rank>
+      </type>
+      <diagnostics>
+        <include_in_visualization/>
+      </diagnostics>
+    </field>
+    <nonlinear_solver name="Solve">
+      <type name="SNES">
+        <form name="Residual" rank="0">
+          <string_value lines="20" type="code" language="python">F = inner(divu_t, divu_i - div(u_i))*dx</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">F</string_value>
+          </ufl_symbol>
+        </form>
+        <form name="Jacobian" rank="1">
+          <string_value lines="20" type="code" language="python">J = derivative(F,udivu_i,udivu_a)</string_value>
+          <ufl_symbol name="solver">
+            <string_value lines="1">J</string_value>
+          </ufl_symbol>
+        </form>
+        <form_representation name="quadrature"/>
+        <quadrature_rule name="default"/>
+        <snes_type name="ls">
+          <ls_type name="cubic"/>
+          <convergence_test name="default"/>
+        </snes_type>
+        <relative_error>
+          <real_value rank="0">1e-06</real_value>
+        </relative_error>
+        <absolute_error>
+          <real_value rank="0">1.e-10</real_value>
+        </absolute_error>
+        <max_iterations>
+          <integer_value rank="0">20</integer_value>
+        </max_iterations>
+        <monitors>
+          <residual/>
+        </monitors>
+        <linear_solver>
+          <iterative_method name="preonly"/>
+          <preconditioner name="lu">
+            <factorization_package name="mumps"/>
+          </preconditioner>
+        </linear_solver>
+        <never_ignore_solver_failures/>
+      </type>
+      <solve name="with_diagnostics"/>
+    </nonlinear_solver>
+  </system>
+</terraferma_options>
